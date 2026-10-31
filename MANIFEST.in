@@ -1,0 +1,13 @@
+include LICENSE
+include MIT协议暨相关引用库协议
+include requirements-inference.txt
+include requirements-dev.txt
+include requirments_*_py312.txt
+include assets/README.md
+recursive-include docs *.md
+recursive-include rvc/separation/resources *.yaml
+include rvc/separation/LICENSE.pymss
+include rvc/separation/LICENSE.pymss-core
+prune tests
+prune .codex
+prune .zcode

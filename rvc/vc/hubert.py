@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from transformers import HubertModel
 
-from rvc.cuda_graph import run_cuda_graph
+from .cuda_graph import run_cuda_graph
 
 
 logger = logging.getLogger(__name__)

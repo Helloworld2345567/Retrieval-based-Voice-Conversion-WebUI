@@ -21,20 +21,15 @@ from rvc.vc.pipeline import Pipeline
 from rvc.vc.rmvpe import RMVPE
 
 
-ROOT = Path(__file__).resolve().parents[1]
-
-
 def pipeline_config(root):
-    return SimpleNamespace(device=torch.device("cpu"), is_half=False, x_pad=1, x_query=6, x_center=38, x_max=41, rmvpe_root=root)
+    return SimpleNamespace(device=torch.device("cpu"), is_half=False, x_pad=1, x_query=6, x_center=38, x_max=41, rmvpe_root=root, cuda_graph=False)
 
 
 class ConversionRuntimeTests(unittest.TestCase):
     def setUp(self):
-        temporary_root = ROOT / ".codex" / "inference-refactor" / "tests"
-        temporary_root.mkdir(parents=True, exist_ok=True)
-        temporary = tempfile.TemporaryDirectory(dir=temporary_root)
+        temporary = tempfile.TemporaryDirectory(prefix="rvc-runtime-test-")
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(temporary.name).resolve()
         self.sample_rate = 32000
         self.audio = (np.sin(2 * np.pi * 220 * np.arange(16000) / self.sample_rate) * 8000).astype(np.int16)
 
@@ -132,7 +127,7 @@ class ConversionRuntimeTests(unittest.TestCase):
         metadata = ModelMetadata("v1", False, self.sample_rate, 1, ())
         result = AudioResult(self.sample_rate, self.audio, (0, 0, 0))
         config = SimpleNamespace(device="cpu", dtype=torch.float32)
-        with patch.object(convert_cli, "load_checkpoint", return_value=({}, metadata)), patch("rvc.runtime.InferenceConfig.create", return_value=config), patch("rvc.vc.engine.VoiceConverter") as converter, contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+        with patch.object(convert_cli, "load_checkpoint", return_value=({}, metadata)), patch("rvc.vc.config.VoiceConversionConfig.create", return_value=config), patch("rvc.vc.engine.VoiceConverter") as converter, contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
             converter.return_value.__enter__.return_value.convert.side_effect = [result, ValueError("bad input")]
             exit_code = convert_cli.main(["--model", str(model_path), "--input", str(source), "--output", str(self.root / "output"), "--index-rate", "0"])
         self.assertEqual(exit_code, 1)

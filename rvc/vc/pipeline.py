@@ -11,8 +11,8 @@ import torch
 import torch.nn.functional as F
 from scipy import signal
 
+from .cuda_graph import run_cuda_graph
 from .hubert import extract_hubert_features
-from rvc.cuda_graph import cuda_graph_enabled, run_cuda_graph
 
 bh, ah = signal.butter(N=5, Wn=48, btype="high", fs=16000)
 
@@ -58,6 +58,7 @@ class Pipeline(object):
         self.t_max = self.sr * self.x_max  # 免查询时长阈值
         self.device = config.device
         self.rmvpe_root = config.rmvpe_root
+        self.cuda_graph = config.cuda_graph
 
     def get_f0(
         self,
@@ -248,7 +249,7 @@ class Pipeline(object):
             audio1 = synthesized[0, 0].data.cpu().float().numpy()
             del hasp, synthesized
         del feats, p_len, padding_mask
-        if torch.cuda.is_available() and not cuda_graph_enabled(self.device):
+        if torch.cuda.is_available() and not self.cuda_graph:
             torch.cuda.empty_cache()
         t2 = ttime()
         times[0] += t1 - t0
@@ -409,6 +410,6 @@ class Pipeline(object):
             max_int16 /= audio_max
         audio_opt = (audio_opt * max_int16).astype(np.int16)
         del pitch, pitchf, sid
-        if torch.cuda.is_available() and not cuda_graph_enabled(self.device):
+        if torch.cuda.is_available() and not self.cuda_graph:
             torch.cuda.empty_cache()
         return audio_opt

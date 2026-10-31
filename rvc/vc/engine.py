@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from rvc.audio import AudioLoader
-from rvc.cuda_graph import clear_cuda_graph_cache
+from .audio import AudioLoader
+from .cuda_graph import clear_cuda_graph_cache
 from .checkpoints import load_checkpoint, select_speaker
 from .hubert import load_hubert_model
 from .models import (

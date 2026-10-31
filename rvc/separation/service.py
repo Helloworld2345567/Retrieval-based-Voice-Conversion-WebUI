@@ -1,8 +1,10 @@
 """File inference shared by the unified CLI and its legacy entry point."""
 import logging
 from pathlib import Path
+from collections.abc import Mapping
 
 from .catalog import get_model
+from .request import SeparationRequest
 
 AUDIO_EXTENSIONS = {".wav", ".flac", ".mp3", ".m4a", ".ogg", ".opus", ".aac", ".wma", ".mp4", ".mkv", ".webm", ".aiff", ".aif"}
 
@@ -19,6 +21,14 @@ def collect_inputs(value):
     return files
 
 
+def _request(value) -> SeparationRequest:
+    if isinstance(value, SeparationRequest):
+        return value
+    if isinstance(value, Mapping):
+        return SeparationRequest.from_dict(value)
+    raise TypeError("request must be a SeparationRequest")
+
+
 def output_paths(spec, input_path, output, output_format, save_as_folder, legacy):
     root = Path(output)
     stem = Path(input_path).stem
@@ -29,11 +39,12 @@ def output_paths(spec, input_path, output, output_format, save_as_folder, legacy
 
 
 def validate_outputs(request):
-    spec = get_model(request["model"])
+    request = _request(request)
+    spec = get_model(request.model)
     seen = set()
-    inputs = {str(Path(path).resolve()).casefold() for path in request["inputs"]}
-    for path in request["inputs"]:
-        for target in output_paths(spec, path, request["output"], request["format"], request["save_as_folder"], request["legacy"]):
+    inputs = {str(Path(path).resolve()).casefold() for path in request.inputs}
+    for path in request.inputs:
+        for target in output_paths(spec, path, request.output, request.format, request.save_as_folder, request.legacy):
             key = str(target.resolve()).casefold()
             if key in seen:
                 raise ValueError(f"Multiple inputs would write the same output: {target}")
@@ -56,24 +67,25 @@ def run_batch(request, runtime):
     from .audio_io import load_audio, save_audio
     from .separator import MSSeparator
 
-    spec = get_model(request["model"])
+    request = _request(request)
+    spec = get_model(request.model)
     logger = logging.getLogger("rvc.separation")
     results = {"successful": 0, "failed": 0, "outputs": []}
-    retry = request.get("allow_fp32_retry", False)
+    retry = request.allow_fp32_retry
     try:
-        separator = MSSeparator(spec, request["model_path"], runtime,
-                                device_ids=request["device_ids"],
-                                inference_params=request["params"], use_tta=request["tta"])
+        separator = MSSeparator(spec, request.model_path, runtime,
+                                device_ids=request.device_ids,
+                                inference_params=request.params.to_dict(), use_tta=request.tta)
     except Exception as error:
         if retry and fp16_retryable(error):
             raise PrecisionRetry(str(error)) from error
         raise
     with separator:
-        for input_path in request["inputs"]:
+        for input_path in request.inputs:
             try:
                 mix, sr = load_audio(input_path, sr=44100, mono=False)
-                targets = output_paths(spec, input_path, request["output"], request["format"],
-                                       request["save_as_folder"], request["legacy"])
+                targets = output_paths(spec, input_path, request.output, request.format,
+                                       request.save_as_folder, request.legacy)
                 batch_size = getattr(separator, "stem_batch_size", 0)
                 if batch_size <= 0 or getattr(separator, "output_normalize", False):
                     batch_size = len(spec.stems)
@@ -89,7 +101,7 @@ def run_batch(request, runtime):
                         if stem not in separated:
                             raise RuntimeError(f"Model did not produce required stem: {stem}")
                         target.parent.mkdir(parents=True, exist_ok=True)
-                        save_audio(str(target), separated[stem], sr, request["format"], request["audio_params"])
+                        save_audio(str(target), separated[stem], sr, request.format, request.audio_params)
                         if not target.is_file() or not target.stat().st_size:
                             raise RuntimeError(f"Encoder produced no output: {target}")
                     del separated

@@ -7,7 +7,7 @@ import sys
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from rvc.convert_cli import main as convert_main
+from rvc.vc.cli import main as convert_main
 
 
 def main(argv=None):

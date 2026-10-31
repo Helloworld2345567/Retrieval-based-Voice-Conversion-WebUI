@@ -1,4 +1,5 @@
 """DirectML subprocess lifetime and precision fallback."""
+
 import json
 import logging
 import os
@@ -8,18 +9,14 @@ import subprocess
 import sys
 import tempfile
 
-from .catalog import PROJECT_ROOT
+from rvc.core.paths import PROJECT_ROOT, cache_root, is_source_tree
+
+from .request import SeparationRequest, normalize_model_dtype
 
 
 def precision_attempts(value=None):
-    value = str(value or os.environ.get("PYMSS_DML_MODEL_DTYPE", "auto")).lower()
-    aliases = {"fp16": "float16", "half": "float16", "fp32": "float32", "float": "float32"}
-    value = aliases.get(value, value)
-    if value == "auto":
-        return ("float16", "float32")
-    if value not in {"float16", "float32"}:
-        raise ValueError("PYMSS_DML_MODEL_DTYPE/model_dtype must be auto, float16 or float32")
-    return (value,)
+    normalized = normalize_model_dtype(value or os.environ.get("PYMSS_DML_MODEL_DTYPE", "auto"))
+    return ("float16", "float32") if normalized == "auto" else (normalized,)
 
 
 def terminate_worker(process):
@@ -39,19 +36,30 @@ def terminate_worker(process):
 
 
 def run_directml(request):
-    attempts = precision_attempts(request["params"].get("model_dtype"))
-    temp_root = PROJECT_ROOT / ".codex" / "separation"
+    if not isinstance(request, SeparationRequest):
+        request = SeparationRequest.from_dict(request)
+    attempts = precision_attempts(request.params.get("model_dtype"))
+    temp_root = cache_root() / "separation"
     temp_root.mkdir(parents=True, exist_ok=True)
     try:
         with tempfile.TemporaryDirectory(prefix="worker-", dir=temp_root) as directory:
             request_path = Path(directory) / "request.json"
             result_path = Path(directory) / "result.json"
             for index, dtype in enumerate(attempts):
-                payload = {**request, "params": {**request["params"], "model_dtype": dtype},
-                           "allow_fp32_retry": index + 1 < len(attempts), "result_path": str(result_path)}
-                request_path.write_text(json.dumps(payload), encoding="utf-8")
+                payload = request.for_precision_attempt(
+                    dtype,
+                    result_path=result_path,
+                    allow_fp32_retry=index + 1 < len(attempts),
+                )
+                request_path.write_text(payload.to_json(), encoding="utf-8")
                 result_path.unlink(missing_ok=True)
-                kwargs = {"cwd": str(PROJECT_ROOT)}
+                kwargs = {}
+                if is_source_tree():
+                    env = os.environ.copy()
+                    env["PYTHONPATH"] = os.pathsep.join(
+                        filter(None, (str(PROJECT_ROOT), env.get("PYTHONPATH")))
+                    )
+                    kwargs["env"] = env
                 if os.name == "nt":
                     kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
                 else:
@@ -81,14 +89,19 @@ def run_directml(request):
 
 
 def main(argv=None):
-    from rvc.runtime import InferenceConfig
+    from rvc.core.devices import DeviceConfig
     from .service import PrecisionRetry, run_batch
 
-    path = Path((argv or sys.argv[1:])[0])
-    request = json.loads(path.read_text(encoding="utf-8"))
-    logging.basicConfig(level=logging.DEBUG if request["debug"] else logging.INFO, format="%(message)s")
+    path = Path((argv or sys.argv[1:])[0]).resolve()
+    request = SeparationRequest.from_json(path.read_text(encoding="utf-8"))
+    if request.result_path is None:
+        raise ValueError("DirectML worker request requires result_path")
+    result_path = Path(request.result_path).resolve()
+    if result_path != path.with_name("result.json"):
+        raise ValueError("DirectML worker result_path must be the worker result file")
+    logging.basicConfig(level=logging.DEBUG if request.debug else logging.INFO, format="%(message)s")
     try:
-        runtime = InferenceConfig.create(device="directml", device_id=request["device_ids"][0])
+        runtime = DeviceConfig.create(device="directml", device_id=request.device_ids[0])
         result = run_batch(request, runtime)
         code = 1 if result["failed"] else 0
     except PrecisionRetry as error:
@@ -97,7 +110,7 @@ def main(argv=None):
         result, code = {"error": "Interrupted"}, 130
     except Exception as error:
         result, code = {"error": str(error)}, 1
-    Path(request["result_path"]).write_text(json.dumps(result), encoding="utf-8")
+    result_path.write_text(json.dumps(result), encoding="utf-8")
     return code
 
 

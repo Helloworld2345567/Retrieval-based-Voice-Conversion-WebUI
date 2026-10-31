@@ -5,7 +5,9 @@ import tempfile
 import urllib.parse
 import urllib.request
 
-from .catalog import PROJECT_ROOT, model_path
+from rvc.core.paths import cache_root
+
+from .catalog import model_path
 
 SOURCES = {
     "modelscope": "https://www.modelscope.cn/models/baicai1145/pymss/resolve/master",
@@ -21,7 +23,7 @@ def download_model(spec, directory=None, *, source="modelscope", endpoint=None, 
     base = endpoint.rstrip("/") if endpoint else SOURCES[source]
     relative = spec.remote_path + "/" + spec.filename
     url = base + "/" + urllib.parse.quote(relative, safe="/")
-    temp_root = PROJECT_ROOT / ".codex" / "downloads"
+    temp_root = cache_root() / "downloads"
     temp_root.mkdir(parents=True, exist_ok=True)
     try:
         with tempfile.TemporaryDirectory(prefix="separation-", dir=temp_root) as temp:

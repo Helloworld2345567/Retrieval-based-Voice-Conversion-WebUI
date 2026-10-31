@@ -10,9 +10,6 @@ def _format_progress_time(value):
         return f'{hours:d}:{minutes:02d}:{seconds:02d}'
     return f'{minutes:d}:{seconds:02d}'
 
-def _is_time_progress_message(message):
-    return 'audio' in str(message).lower()
-
 def _format_progress_rtf(bar):
     done = float(bar.n or 0)
     if done <= 0:
@@ -101,35 +98,3 @@ class _ProgressContext:
             return
         if self.bar:
             self.bar.close()
-
-class _CliInferenceProgress:
-
-    def __init__(self):
-        self._bar = None
-        self._message = None
-        self._total = None
-
-    def __call__(self, done, total, message):
-        total = max(1, int(total or 1))
-        done = max(0, min(int(done), total))
-        if self._bar is None or self._message != message or self._total != total or (done < self._bar.n):
-            self.close()
-            self._message = message
-            self._total = total
-            bar_kwargs = {'total': total, 'desc': message, 'leave': False, 'mininterval': 0, 'miniters': 1}
-            if _is_time_progress_message(message):
-                bar_kwargs.update({'unit': '', 'bar_format': '{l_bar}{bar}| {audio_progress}'})
-                self._bar = _TimeProgressTqdm(**bar_kwargs)
-            else:
-                self._bar = tqdm(**bar_kwargs)
-            if _is_time_progress_message(message):
-                _update_time_progress_bar(self._bar)
-        if done != self._bar.n:
-            self._bar.update(done - self._bar.n)
-            if _is_time_progress_message(message):
-                _update_time_progress_bar(self._bar)
-
-    def close(self):
-        if self._bar is not None:
-            self._bar.close()
-            self._bar = None

@@ -1,11 +1,25 @@
 .codex/
+.zcode/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Runtime data and generated output
+logs/
 assets/weights/
 assets/indices/
 assets/hubert_base/
 assets/rmvpe/
-assets/pymss_weights/*.ckpt
-assets/pymss_weights/*.part
+assets/pymss_weights/**
 results/
+
+# Optional project-local media tools
+/ffmpeg
+/ffmpeg.exe
+/ffprobe
+/ffprobe.exe
+
+# Python packaging output
+/build/
+/dist/
+*.egg-info/

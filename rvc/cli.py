@@ -8,7 +8,7 @@ def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     try:
         if args and args[0] == "convert":
-            from .convert_cli import main as convert
+            from .vc.cli import main as convert
 
             return convert(args[1:])
         if args and args[0] == "separate":

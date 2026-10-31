@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from librosa.util import pad_center
 from scipy.signal import get_window
 
-from rvc.cuda_graph import run_cuda_graph
+from .cuda_graph import run_cuda_graph
 
 import logging
 

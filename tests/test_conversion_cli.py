@@ -11,9 +11,6 @@ from rvc import convert_cli
 from rvc.vc.checkpoints import find_index, metadata_from_checkpoint, select_speaker
 
 
-ROOT = Path(__file__).resolve().parents[1]
-
-
 def checkpoint(speakers=None, count=8, **values):
     return {
         "weight": {"emb_g.weight": SimpleNamespace(shape=(count, 8))},
@@ -58,11 +55,9 @@ class ConversionMetadataTests(unittest.TestCase):
 
 class ConversionPathTests(unittest.TestCase):
     def setUp(self):
-        temporary_root = ROOT / ".codex" / "inference-refactor" / "tests"
-        temporary_root.mkdir(parents=True, exist_ok=True)
-        self.temporary = tempfile.TemporaryDirectory(dir=temporary_root)
+        self.temporary = tempfile.TemporaryDirectory(prefix="rvc-cli-test-")
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
 
     def write(self, path):
         path = self.root / path

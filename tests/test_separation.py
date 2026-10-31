@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from rvc.separation import catalog, cli, download, service, worker
+from rvc.separation.request import AudioEncodingParams, InferenceParams, SeparationRequest
 
 
 def test_five_presets_and_legacy_aliases():
@@ -32,6 +33,37 @@ def test_encoding_defaults_and_cuda_ids():
     args = cli.build_parser(legacy=True).parse_args(["infer", "vocals", "-i", "in.wav", "--device-id", "0", "--device-id", "1"])
     assert args.device_ids == [0, 1]
     assert (args.wav_bit_depth, args.flac_bit_depth, args.mp3_bit_rate, args.m4a_bit_rate) == ("FLOAT", "PCM_16", "320k", "512k")
+
+
+def separation_request(**updates):
+    values = {
+        "model": "vocals",
+        "inputs": ("input.wav",),
+        "output": "results",
+        "format": "wav",
+        "params": InferenceParams(),
+        "audio_params": AudioEncodingParams(),
+    }
+    values.update(updates)
+    return SeparationRequest(**values)
+
+
+def test_typed_request_round_trip_and_validation():
+    request = separation_request(
+        inputs=("音频.wav",),
+        params=InferenceParams(chunk_size=128, overlap_size=32, model_dtype="fp16"),
+    )
+    restored = SeparationRequest.from_json(request.to_json())
+    assert restored == request
+    assert restored.params.model_dtype == "float16"
+    assert Path(restored.inputs[0]).is_absolute()
+    assert Path(restored.output).is_absolute()
+    with pytest.raises(ValueError, match="smaller"):
+        InferenceParams(chunk_size=128, overlap_size=128)
+    with pytest.raises(ValueError, match="Unsupported inference"):
+        InferenceParams.from_mapping({"unknown": 1})
+    with pytest.raises(ValueError, match="path string"):
+        SeparationRequest.from_dict({"model": "vocals", "inputs": [123], "output": "results", "format": "wav"})
 
 
 @pytest.mark.parametrize("arguments", [["serve"], ["workflow"], ["ensemble"], ["infer", "vocals", "-i", "input", "--device-id", "-1"], ["infer", "vocals", "-i", "input", "--param", "broken"], ["infer", "vocals", "-i", "input", "--param", "batch_size=0"]])
@@ -69,7 +101,7 @@ def test_input_directory_and_explicit_old_model_cache(tmp_path):
 def test_missing_download_is_validated_and_cleaned(tmp_path, monkeypatch):
     from io import BytesIO
     spec = catalog.get_model("vocals")
-    monkeypatch.setattr(download, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(download, "cache_root", lambda: tmp_path / ".codex")
     monkeypatch.setattr(download.urllib.request, "urlopen", lambda *a, **k: BytesIO(b"incomplete"))
     with pytest.raises(ValueError, match="Incomplete"):
         download.download_model(spec, tmp_path / "weights")
@@ -130,6 +162,8 @@ def test_batch_failure_is_counted(tmp_path, monkeypatch):
 
 def test_directml_fallback_fresh_process_and_cleanup(tmp_path, monkeypatch):
     monkeypatch.setattr(worker, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(worker, "cache_root", lambda: tmp_path / ".codex")
+    monkeypatch.setattr(worker, "is_source_tree", lambda: True)
     requests = []
     class FakeProcess:
         def __init__(self, args, **kwargs):
@@ -140,15 +174,26 @@ def test_directml_fallback_fresh_process_and_cleanup(tmp_path, monkeypatch):
         def wait(self): return self.code
         def poll(self): return self.code
     monkeypatch.setattr(worker.subprocess, "Popen", FakeProcess)
-    result = worker.run_directml({"params": {}})
+    result = worker.run_directml(separation_request())
     assert result["successful"] == 1
     assert [r["params"]["model_dtype"] for r in requests] == ["float16", "float32"]
     assert requests[0]["allow_fp32_retry"] and not requests[1]["allow_fp32_retry"]
     assert not (tmp_path / ".codex" / "separation").exists()
 
 
+def test_directml_worker_cannot_overwrite_request(tmp_path):
+    request_path = tmp_path / "request.json"
+    request = separation_request(result_path=str(request_path))
+    request_path.write_text(request.to_json(), encoding="utf-8")
+    original = request_path.read_text(encoding="utf-8")
+    with pytest.raises(ValueError, match="worker result file"):
+        worker.main([str(request_path)])
+    assert request_path.read_text(encoding="utf-8") == original
+
+
 def test_directml_interrupt_cleans_worker_and_temp(tmp_path, monkeypatch):
-    monkeypatch.setattr(worker, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(worker, "cache_root", lambda: tmp_path / ".codex")
+    monkeypatch.setattr(worker, "is_source_tree", lambda: False)
     terminated = []
     class Interrupted:
         def __init__(self, *a, **k): pass
@@ -156,7 +201,7 @@ def test_directml_interrupt_cleans_worker_and_temp(tmp_path, monkeypatch):
     monkeypatch.setattr(worker.subprocess, "Popen", Interrupted)
     monkeypatch.setattr(worker, "terminate_worker", lambda process: terminated.append(process))
     with pytest.raises(KeyboardInterrupt):
-        worker.run_directml({"params": {}})
+        worker.run_directml(separation_request())
     assert len(terminated) == 1
     assert not (tmp_path / ".codex" / "separation").exists()
 
@@ -166,9 +211,27 @@ def test_oom_is_not_precision_retry():
     assert service.fp16_retryable(NotImplementedError("FP16 operator unsupported"))
 
 
+def test_audio_bitrate_validation_matches_encoder():
+    from rvc.separation.audio_io import _bitrate_to_int
+
+    assert _bitrate_to_int("320k") == 320000
+    assert _bitrate_to_int("1.5m") == 1500000
+    assert AudioEncodingParams(mp3_bit_rate="1m").mp3_bit_rate == "1m"
+    with pytest.raises(ValueError, match="positive bitrate"):
+        AudioEncodingParams(mp3_bit_rate="1.5")
+
+
+def test_invalid_audio_encoding_is_cli_error(tmp_path):
+    path = tmp_path / "input.wav"
+    path.write_bytes(b"audio")
+    with pytest.raises(SystemExit) as error:
+        cli.main(["infer", "vocals", "-i", str(path), "--mp3-bit-rate", "broken"])
+    assert error.value.code == 2
+
+
 def test_invalid_chunking_rejected_before_download(tmp_path, monkeypatch):
-    import rvc.runtime
-    monkeypatch.setattr(rvc.runtime.InferenceConfig, "create", lambda **kwargs: SimpleNamespace(device="cpu"))
+    from rvc.core.devices import DeviceConfig
+    monkeypatch.setattr(DeviceConfig, "create", lambda **kwargs: SimpleNamespace(device="cpu"))
     monkeypatch.setattr(download, "download_model", lambda *a, **k: pytest.fail("invalid request downloaded a model"))
     path = tmp_path / "input.wav"
     path.write_bytes(b"audio")

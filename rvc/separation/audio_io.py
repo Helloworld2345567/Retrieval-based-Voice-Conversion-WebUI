@@ -1,13 +1,13 @@
 import json
 import subprocess
-from pathlib import Path
 import av
 import numpy as np
 
+from rvc.core.executables import find_executable
+
 
 def _executable(name):
-    local = Path(__file__).resolve().parents[2] / (name + '.exe')
-    return str(local) if local.is_file() else name
+    return find_executable(name)
 
 def _frame_to_audio(frame, mono):
     audio = frame.to_ndarray()
@@ -91,7 +91,8 @@ def _bitrate_to_int(value):
     if isinstance(value, int):
         return value
     value = str(value).strip().lower()
-    return int(float(value[:-1]) * 1000) if value.endswith('k') else int(value)
+    multipliers = {'k': 1000, 'm': 1000000}
+    return int(float(value[:-1]) * multipliers[value[-1]]) if value[-1:] in multipliers else int(value)
 
 def _format_audio(audio):
     audio = np.asarray(audio)

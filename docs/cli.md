@@ -1,6 +1,17 @@
 # CLI 使用说明
 
-从仓库根目录运行命令。安装与模型资源准备见 [README](../README.md)。帮助、分离模型列表和详情不会初始化推理设备或下载权重。
+安装与模型资源准备见 [README](../README.md)，模块边界与资源合同见 [架构说明](architecture.md)。安装项目后，console script 与模块入口等价：
+
+```bash
+python -m pip install -e .              # 源码开发
+rvc --help
+python -m rvc --help
+
+python -m build --wheel                 # 发布 wheel
+python -m pip install --no-deps dist/rvc_cli_inference-*.whl
+```
+
+先按 README 安装对应 CPU/DirectML/CUDA 依赖。wheel 不携带模型 payload；从仓库外运行时应使用显式路径、CLI 参数或环境变量指向可写的外部资源目录。帮助、分离模型列表和详情不会初始化推理设备或下载权重。
 
 ## 变声
 
@@ -68,7 +79,7 @@ python -m rvc separate infer vocals --input INPUT --output OUTPUT_DIR
 - `info MODEL`：输出 JSON，包括模型与配置路径、架构、声部、输出后缀和预期权重大小；可指定 `--model-dir`。权重尚不存在时也可查询。
 - `download MODEL`：下载一个模型；`download all` 下载五个模型，单个失败后继续其余任务。已有权重默认复用，`--force` 强制重新下载。`--supported-only` 为兼容参数，这五个模型均受支持。
 
-`download` 与 `infer` 共用 `--model-dir`、`--source` 和 `--endpoint`。模型目录按以下优先级选择：`--model-dir` → `PYMSS_MODEL_DIR` → `weight_pymss_root` → 项目内 `assets/pymss_weights/`。相对目录以调用目录为基准。优先读取目录中平铺的权重，也兼容读取旧分类子目录中的已有同名权重。模型配置始终使用包内 `rvc/separation/resources/`。
+`download` 与 `infer` 共用 `--model-dir`、`--source` 和 `--endpoint`。模型目录按以下优先级选择：`--model-dir` → `PYMSS_MODEL_DIR` → `weight_pymss_root` → 默认数据目录下的 `assets/pymss_weights/`。源码检出默认数据目录是项目根；wheel 安装使用平台用户数据目录，也可由 `RVC_DATA_DIR` 覆盖。相对显式目录以调用目录为基准。优先读取目录中平铺的权重，也兼容读取旧分类子目录中的已有同名权重。模型配置始终使用包内 `rvc/separation/resources/`。
 
 `--source` 可选 `modelscope`（默认）、`huggingface`、`hf-mirror`。`--endpoint` 优先于该选项，按 `<endpoint>/<分类路径>/<完整模型名>` 获取文件。`infer` 缺权重时自动下载；兼容参数 `--download` 不会强制替换已存在的权重。
 
@@ -117,8 +128,24 @@ DirectML 参数精度优先取 `--param model_dtype=...`，其次为 `PYMSS_DML_
 
 两条推理链的 `auto` 都先选择符合运行时资格规则的 CUDA 设备，再尝试 DirectML，最后使用 CPU。CUDA 自动选择按计算能力、显存排序；指定 `--device-id` 时限制对应编号。显式 `--device cuda/directml` 不可用时会报错。DirectML 需要 Windows 的对应依赖环境。
 
+规范模块为 `rvc.core`（共享设备、路径、FFmpeg 查找）、`rvc.vc`（变声）和 `rvc.separation`（分离）。以下旧入口只作为迁移 adapter，不应成为新集成的依赖：
+
+| 旧入口 | 规范入口 | 状态 |
+| --- | --- | --- |
+| `infer/cli.py` | `rvc.vc.cli` / `rvc convert` | 命令兼容 |
+| `tools.pymss.cli` | `rvc.separation.cli` / `rvc separate` | 命令兼容 |
+| `rvc.runtime` | `rvc.core.devices`, `rvc.core.paths`, `rvc.vc.config` | 浅转发 |
+| `rvc.audio`, `rvc.convert_cli`, `rvc.cuda_graph`, `tools.cuda_graph` | 对应 `rvc.vc.*` 模块 | 浅转发 |
+| `infer.audio/fcpe/hubert/rmvpe`、`infer.module` 推理子集、`infer.vc.pipeline/utils` | 对应 `rvc.vc.*` 对象 | 只保留严格等价的推理导出 |
+| `tools.pymss` | `rvc.separation` 固定五模型 interface | 不含 server/workflow/ensemble |
+
+旧 WebUI、训练、实时/VST、PyMSS server、workflow、ensemble 和固定五模型以外的分离后端不受支持。完整兼容矩阵见 [架构说明](architecture.md)。
+
 ```bash
+# 源码检出
 python infer/cli.py --model MODEL.pth --input INPUT --output OUTPUT
+# wheel 安装后等价入口
+python -m infer.cli --model MODEL.pth --input INPUT --output OUTPUT
 python -m tools.pymss.cli infer vocals --input INPUT --output OUTPUT_DIR
 python -m tools.pymss.cli list
 ```

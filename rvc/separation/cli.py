@@ -1,4 +1,5 @@
 """CLI parsing is lightweight; device/model imports occur only for inference."""
+
 import argparse
 import json
 import logging
@@ -6,26 +7,7 @@ from pathlib import Path
 import sys
 
 from .catalog import MODELS, get_model, model_path
-
-
-def parse_params(values):
-    result = {}
-    for value in values or []:
-        if "=" not in value:
-            raise ValueError(f"Expected key=value, got {value!r}")
-        key, raw = value.split("=", 1)
-        if raw.lower() in {"true", "false"}:
-            parsed = raw.lower() == "true"
-        else:
-            try:
-                parsed = int(raw)
-            except ValueError:
-                try:
-                    parsed = float(raw)
-                except ValueError:
-                    parsed = raw
-        result[key] = parsed
-    return result
+from .request import AudioEncodingParams, InferenceParams, SeparationRequest, parse_params
 
 
 def build_parser(*, legacy=False):
@@ -74,45 +56,57 @@ def describe(spec, directory=None):
             "stems": spec.stems, "output_suffixes": spec.suffixes, "size_bytes": spec.size_bytes}
 
 
+def _build_request(args, *, legacy):
+    from .service import collect_inputs
+
+    return SeparationRequest(
+        model=get_model(args.model).name,
+        inputs=tuple(collect_inputs(args.input)),
+        output=str(Path(args.output).expanduser().resolve()),
+        format=args.output_format,
+        legacy=legacy,
+        save_as_folder=args.save_as_folder,
+        device_ids=tuple(args.device_ids or [0]),
+        params=args.inference_params,
+        tta=args.tta,
+        debug=args.debug,
+        audio_params=args.audio_params,
+    )
+
+
 def cmd_infer(args, *, legacy, parser):
-    from .service import collect_inputs, validate_outputs
+    from .service import validate_outputs
 
     spec = get_model(args.model)
-    device_ids = args.device_ids or [0]
-    if any(index < 0 for index in device_ids) or len(set(device_ids)) != len(device_ids):
-        raise ValueError("Device IDs must be distinct nonnegative integers")
-    params = parse_params(args.param)
-    request = {"model": spec.name, "inputs": collect_inputs(args.input),
-               "output": str(Path(args.output).expanduser().resolve()),
-               "format": args.output_format, "legacy": legacy,
-               "save_as_folder": args.save_as_folder, "device_ids": device_ids,
-               "params": params, "tta": args.tta, "debug": args.debug,
-               "audio_params": {name: getattr(args, name) for name in
-                                ("wav_bit_depth", "flac_bit_depth", "mp3_bit_rate", "m4a_bit_rate", "m4a_codec", "m4a_aac_at_quality")}}
+    request = _build_request(args, legacy=legacy)
     validate_outputs(request)
-    from rvc.runtime import InferenceConfig
-    runtime = InferenceConfig.create(device=args.device, device_id=args.device_ids[0] if args.device_ids else None)
+
+    from rvc.core.devices import DeviceConfig
+
+    runtime = DeviceConfig.create(device=args.device, device_id=args.device_ids[0] if args.device_ids else None)
     selected_type = str(runtime.device).split(":", 1)[0]
-    if len(device_ids) > 1 and selected_type != "cuda":
+    if len(request.device_ids) > 1 and selected_type != "cuda":
         parser.error("Multiple device IDs require CUDA")
-    chunk_size = params.get("chunk_size", 88200 if selected_type == "privateuseone" else 352800)
-    overlap_size = params.get("overlap_size", 22050 if selected_type == "privateuseone" else spec.overlap_size)
+    chunk_size = request.params.get("chunk_size", 88200 if selected_type == "privateuseone" else 352800)
+    overlap_size = request.params.get("overlap_size", 22050 if selected_type == "privateuseone" else spec.overlap_size)
     if overlap_size >= chunk_size:
         parser.error("overlap_size must be smaller than chunk_size")
-    if args.device_ids is None and selected_type == "cuda":
-        request["device_ids"] = [runtime.device.index or 0]
+    if args.device_ids is None and selected_type in {"cuda", "privateuseone"}:
+        request = request.with_updates(device_ids=(runtime.device.index or 0,))
+
     path = model_path(spec, args.model_dir)
     if not path.is_file():
         from .download import download_model
+
         path = download_model(spec, args.model_dir, source=args.source, endpoint=args.endpoint)
-    request["model_path"] = str(path)
+    request = request.with_updates(model_path=str(path))
     if selected_type == "privateuseone":
-        if args.device_ids is None:
-            request["device_ids"] = [runtime.device.index or 0]
         from .worker import run_directml
+
         result = run_directml(request)
     else:
         from .service import run_batch
+
         result = run_batch(request, runtime)
     print(f"Processed {result['successful']} file(s), failed {result['failed']}.")
     return 1 if result["failed"] or not result["successful"] else 0
@@ -122,28 +116,21 @@ def main(argv=None, *, legacy=False):
     parser = build_parser(legacy=legacy)
     args = parser.parse_args(argv)
     if args.command == "infer":
-        if args.device_ids and (any(index < 0 for index in args.device_ids) or len(set(args.device_ids)) != len(args.device_ids)):
-            parser.error("Device IDs must be distinct nonnegative integers")
-        if args.device_ids and len(args.device_ids) > 1 and args.device in {"cpu", "directml"}:
-            parser.error("Multiple device IDs require CUDA")
         try:
-            params = parse_params(args.param)
-            allowed = {"batch_size", "chunk_size", "overlap_size", "standardize", "normalize", "use_amp", "model_dtype", "cuda_attention_backend", "stem_batch_size"}
-            if set(params) - allowed:
-                raise ValueError("Unsupported inference parameters: " + ", ".join(sorted(set(params) - allowed)))
-            for key in {"batch_size", "chunk_size", "overlap_size", "stem_batch_size"} & params.keys():
-                if type(params[key]) is not int or params[key] < (1 if key in {"batch_size", "chunk_size"} else 0):
-                    raise ValueError(f"Invalid {key}: expected a {'positive' if key in {'batch_size', 'chunk_size'} else 'nonnegative'} integer")
-            for key in {"standardize", "normalize", "use_amp"} & params.keys():
-                if type(params[key]) is not bool:
-                    raise ValueError(f"Invalid {key}: expected true or false")
-            if "model_dtype" in params:
-                from .worker import precision_attempts
-                precision_attempts(params["model_dtype"])
-            if "cuda_attention_backend" in params:
-                value = str(params["cuda_attention_backend"]).lower().replace("-", "_")
-                if value not in {"auto", "torch", "default", "sdpa", "flash", "flash_attention", "cudnn", "cudnn_attn", "cudnn_attention", "efficient", "mem_efficient", "memory_efficient", "math", "xformers"}:
-                    raise ValueError("Invalid cuda_attention_backend")
+            args.inference_params = InferenceParams.from_mapping(parse_params(args.param))
+            args.audio_params = AudioEncodingParams(
+                wav_bit_depth=args.wav_bit_depth,
+                flac_bit_depth=args.flac_bit_depth,
+                mp3_bit_rate=args.mp3_bit_rate,
+                m4a_bit_rate=args.m4a_bit_rate,
+                m4a_codec=args.m4a_codec,
+                m4a_aac_at_quality=args.m4a_aac_at_quality,
+            )
+            device_ids = tuple(args.device_ids or [0])
+            if any(index < 0 for index in device_ids) or len(set(device_ids)) != len(device_ids):
+                raise ValueError("Device IDs must be distinct nonnegative integers")
+            if len(device_ids) > 1 and args.device in {"cpu", "directml"}:
+                raise ValueError("Multiple device IDs require CUDA")
         except ValueError as error:
             parser.error(str(error))
     try:
@@ -160,6 +147,7 @@ def main(argv=None, *, legacy=False):
             return 0
         if args.command == "download":
             from .download import download_model
+
             failed = 0
             for spec in MODELS if args.model == "all" else (get_model(args.model),):
                 try:

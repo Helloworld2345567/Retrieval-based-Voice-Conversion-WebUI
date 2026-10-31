@@ -3,7 +3,8 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from rvc.core.paths import data_root
+
 RESOURCE_ROOT = Path(__file__).resolve().parent / "resources"
 
 
@@ -60,7 +61,7 @@ def get_model(value):
 
 def model_root(directory=None):
     value = directory or os.environ.get("PYMSS_MODEL_DIR") or os.environ.get("weight_pymss_root")
-    return Path(value).expanduser().resolve() if value else PROJECT_ROOT / "assets" / "pymss_weights"
+    return Path(value).expanduser().resolve() if value else data_root() / "assets" / "pymss_weights"
 
 
 def model_path(spec, directory=None):

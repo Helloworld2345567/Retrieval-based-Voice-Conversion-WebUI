@@ -1,6 +1,6 @@
 import torch
 
-from rvc.cuda_graph import cuda_graph_enabled, run_cuda_graph
+from .cuda_graph import cuda_graph_enabled, run_cuda_graph
 
 
 def _is_directml_device(device):
