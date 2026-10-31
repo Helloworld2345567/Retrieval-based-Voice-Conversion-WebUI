@@ -5,9 +5,9 @@
 上述版权声明和本许可声明应包含在软件的所有副本或实质部分中。
 软件是“按原样”提供的，没有任何明示或暗示的保证，包括但不限于适销性、适用于特定目的和不侵权的保证。在任何情况下，作者或版权持有人均不承担因软件或软件的使用或其他交易而产生、产生或与之相关的任何索赔、损害赔偿或其他责任，无论是在合同诉讼、侵权诉讼还是其他诉讼中。
 
+当前保留的引用项目与许可
 
-The LICENCEs for related libraries are as follows.
-相关引用库协议如下：
+项目许可原文见根目录 LICENSE。以下清单对应保留的推理代码、模型来源和外部音频工具；Python 运行依赖及版本见 requirements-inference.txt 与各硬件安装文件。
 
 ContentVec
 https://github.com/auspicious3000/contentvec/blob/main/LICENSE
@@ -21,25 +21,17 @@ HIFIGAN
 https://github.com/jik876/hifi-gan/blob/master/LICENSE
 MIT License
 
-gradio
-https://github.com/gradio-app/gradio/blob/main/LICENSE
-Apache License 2.0
+PyMSS / PyMSS Core
+https://github.com/pymss-project/pymss
+MIT License；保留的许可全文：
+rvc/separation/LICENSE.pymss
+rvc/separation/LICENSE.pymss-core
 
-ffmpeg
-https://github.com/FFmpeg/FFmpeg/blob/master/COPYING.LGPLv3
-https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2021-02-28-12-32/ffmpeg-n4.3.2-160-gfbb9368226-win64-lgpl-4.3.zip
-LPGLv3 License
-MIT License
+RMVPE 模型与实现来源
+https://github.com/Dream-High/RMVPE
+https://github.com/yxlllc/RMVPE
+预训练模型的适用条款以所选发布源为准。
 
-ultimatevocalremovergui
-https://github.com/Anjok07/ultimatevocalremovergui/blob/master/LICENSE
-https://github.com/yang123qwe/vocal_separation_by_uvr5
-MIT License
-
-audio-slicer
-https://github.com/openvpi/audio-slicer/blob/main/LICENSE
-MIT License
-
-PySimpleGUI
-https://github.com/PySimpleGUI/PySimpleGUI/blob/master/license.txt
-LPGLv3 License
+FFmpeg / ffprobe
+https://ffmpeg.org/legal.html
+FFmpeg 的具体许可证取决于所使用的构建及启用组件（LGPL 或 GPL）；应同时保留所分发二进制的许可与构建说明。

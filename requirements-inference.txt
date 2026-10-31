@@ -1,0 +1,13 @@
+# Shared offline inference dependencies, Python 3.12.
+av>=15.1.0,<16
+faiss-cpu>=1.13.0,<2
+ffmpeg-python>=0.2.0,<1
+librosa>=0.10.2,<0.11
+numpy>=1.26.4,<2
+praat-parselmouth>=0.4.5,<1
+PyYAML>=6.0,<7
+scipy>=1.13.1,<2
+soundfile>=0.13.0,<1
+torchfcpe>=0.0.4,<0.1
+tqdm>=4.67.0,<5
+transformers>=4.49.0,<4.50

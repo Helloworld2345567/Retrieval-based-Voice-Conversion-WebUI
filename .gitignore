@@ -1,0 +1,11 @@
+.codex/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+assets/weights/
+assets/indices/
+assets/hubert_base/
+assets/rmvpe/
+assets/pymss_weights/*.ckpt
+assets/pymss_weights/*.part
+results/
